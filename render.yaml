@@ -1,0 +1,28 @@
+# Render Blueprint - one free web service in Frankfurt running the dry-run executor.
+# Dashboard: New + -> Blueprint -> pick the wallet-lab-edge repo -> it reads this file.
+# The two secrets are entered once in the dashboard (sync: false = "ask me"):
+#   GSTREAM_TOKEN  the PublicNode Yellowstone token (from copybot/gstream.txt on the PC)
+#   EDGE_KEY       any long random string; the PC uses the same value to pull rows
+services:
+  - type: web
+    name: edge-fra
+    runtime: docker
+    region: frankfurt
+    plan: free
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    autoDeploy: true
+    healthCheckPath: /
+    envVars:
+      - key: GSTREAM_TOKEN
+        sync: false
+      - key: EDGE_KEY
+        sync: false
+      - key: SEED_URL
+        value: https://raw.githubusercontent.com/bschriver92-blip/wallet-lab-seed/main/seed.db
+      - key: WS_URL
+        value: wss://solana-rpc.publicnode.com
+      - key: COPYBOT_DB
+        value: /tmp/lab/copybot.db
+      - key: PYTHONUNBUFFERED
+        value: "1"

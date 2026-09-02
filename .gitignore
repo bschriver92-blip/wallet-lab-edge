@@ -1,0 +1,7 @@
+copybot/gstream.txt
+copybot/execd_key.txt
+*.db
+*.db-*
+__pycache__/
+*.pyc
+.env
