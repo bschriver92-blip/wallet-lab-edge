@@ -1,0 +1,56 @@
+name: deep-pull
+# Fan the deep history pull out over GitHub-hosted runners: the public RPC limits getTransaction
+# per IP (~0.5-0.8 tx/s measured 09-03), every job here has its own IP, and minutes are free on a
+# public repo. Each shard writes deep_<wallet>.db files (INSERT OR IGNORE-mergeable) as an artifact.
+on:
+  workflow_dispatch:
+    inputs:
+      shards:
+        description: "number of shards (parallel jobs)"
+        default: "20"
+        required: true
+      days:
+        description: "days of history"
+        default: "180"
+        required: true
+      list:
+        description: "wallet list file in the repo"
+        default: "deep_list.txt"
+        required: true
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      shards: ${{ steps.mk.outputs.list }}
+    steps:
+      - id: mk
+        run: echo "list=[$(seq -s, 0 $(( ${{ inputs.shards }} - 1 )))]" >> "$GITHUB_OUTPUT"
+
+  pull:
+    needs: plan
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    strategy:
+      fail-fast: false
+      max-parallel: 20
+      matrix:
+        shard: ${{ fromJSON(needs.plan.outputs.shards) }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install -r requirements.txt
+      - name: decoders import
+        run: python -c "import sys; sys.path.insert(0, 'copybot'); import tape, chain; print('decoders ok')"
+      - name: pull shard
+        env:
+          DEEP_PER_EP: "3"
+          DEEP_REQUIRE_TAPE: "1"
+        run: python copybot/deep_pull.py --list ${{ inputs.list }} --days ${{ inputs.days }} --out out --shard ${{ matrix.shard }}/${{ inputs.shards }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: deep-${{ matrix.shard }}
+          path: out/*.db
+          if-no-files-found: warn
