@@ -1,0 +1,47 @@
+name: deep-candles
+# Fan the hourly-candle fetch (GeckoTerminal, per-IP rate limit) out over runners, one IP per shard.
+# Input: deep_coins.txt in the repo (mint lo hi per line, from deep_candles.py --export). Output:
+# artifact candles-<i> holding candles_<i>.db, merged on the PC with deep_candles.py --merge.
+on:
+  workflow_dispatch:
+    inputs:
+      shards:
+        description: "number of shards (parallel jobs)"
+        default: "20"
+        required: true
+      coins:
+        description: "coin list file in the repo"
+        default: "deep_coins.txt"
+        required: true
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      shards: ${{ steps.mk.outputs.list }}
+    steps:
+      - id: mk
+        run: echo "list=[$(seq -s, 0 $(( ${{ inputs.shards }} - 1 )))]" >> "$GITHUB_OUTPUT"
+
+  candles:
+    needs: plan
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    strategy:
+      fail-fast: false
+      max-parallel: 20
+      matrix:
+        shard: ${{ fromJSON(needs.plan.outputs.shards) }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install httpx
+      - name: fetch shard
+        run: python copybot/deep_candles.py --coins ${{ inputs.coins }} --shard ${{ matrix.shard }}/${{ inputs.shards }} --out out/candles_${{ matrix.shard }}.db --max-calls 100000
+      - uses: actions/upload-artifact@v4
+        with:
+          name: candles-${{ matrix.shard }}
+          path: out/*.db
+          if-no-files-found: warn
