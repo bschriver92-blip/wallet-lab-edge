@@ -805,7 +805,7 @@ class Execd:
                 wl = list(self.watched)
                 n_upd, t_open, t_last = 0, time.time(), time.time()
                 print(f"{time.strftime('%H:%M:%S')} gRPC[{name}]: subscribing {len(wl)} wallets", flush=True)
-                for upd in stub.Subscribe(iter([gstream.subscribe_request(wl, failed=True)])):
+                for upd in stub.Subscribe(iter([gstream.subscribe_request(wl, failed=False)])):   # failed=True made PublicNode stream ~450 tx/s (filter ignored) - 09-03
                     if self.stop:
                         break
                     n_upd += 1
