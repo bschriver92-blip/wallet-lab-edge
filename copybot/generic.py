@@ -129,15 +129,27 @@ def filter(logs):
     return None
 
 
-def fetch(sig, client=None, tries=8, pause=0.5):
-    """getTransaction at confirmed (processed is not served); retried while it lands."""
+_limited_until = {}          # url -> time we may call it again (429 back-off, shared by all threads)
+
+
+def fetch(sig, client=None, tries=4, pause=0.6):
+    """getTransaction at confirmed (processed is not served); retried while it lands.
+    09-03: 8 tries x 2 endpoints per notification blew publicnode's 2,400 req/min after a
+    reboot (3,300 notifications -> ~50k calls). Now 4 tries, and a 429 parks that endpoint
+    for 20 s for every thread instead of hammering the next one."""
     c = client or httpx.Client(headers=UA, timeout=8)
     body = {"jsonrpc": "2.0", "id": 1, "method": "getTransaction",
             "params": [sig, {"encoding": "json", "maxSupportedTransactionVersion": 0, "commitment": "confirmed"}]}
     for i in range(tries):
         for url in (RPC2, RPC):
+            if _limited_until.get(url, 0) > time.time():
+                continue
             try:
-                r = c.post(url, json=body).json()
+                resp = c.post(url, json=body)
+                if resp.status_code == 429:
+                    _limited_until[url] = time.time() + 20
+                    continue
+                r = resp.json()
                 if r.get("result"):
                     return r["result"]
             except Exception:

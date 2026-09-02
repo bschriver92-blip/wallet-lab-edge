@@ -243,6 +243,11 @@ class Execd:
             # mention the wallet) off the RPC, then the tx's own balance deltas
             # tell the truth on any DEX (generic.py)
             venue = generic.filter(logs)
+            # with a live gRPC stream the wallet's transaction arrives whole (no fetch) ~0.2 s
+            # BEFORE this websocket notice; the fetch here is only a fallback for a dead stream
+            if venue and time.time() - getattr(self, "grpc_last", 0) < 5:
+                self.n["g_skipped_grpc"] = self.n.get("g_skipped_grpc", 0) + 1
+                venue = None
             if venue:
                 wallet = self.submap.get(id(ws), {}).get(sub_id)
                 if wallet:
@@ -808,6 +813,7 @@ class Execd:
                     if time.time() - t_last > 120:
                         print(f"{time.strftime('%H:%M:%S')} gRPC[{name}]: {n_upd} updates so far, {self.n.get('grpc', 0)} trades fed", flush=True)
                         t_last = time.time()
+                    self.grpc_last = time.time()
                     if upd.HasField("transaction"):
                         self.on_grpc(upd, set(wl), name)
                     if set(self.watched) != set(wl):
