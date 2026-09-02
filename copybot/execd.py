@@ -123,6 +123,7 @@ class Execd:
         c = store.db()
         c.executescript(SCHEMA)
         have = {r[1] for r in c.execute("PRAGMA table_info(exec_sim)")}
+        c.execute("CREATE TABLE IF NOT EXISTS precursors(sig TEXT, wallet TEXT, mint TEXT, kind TEXT, t_seen REAL, slot INTEGER, PRIMARY KEY(sig, mint))")
         for col, typ in EXTRA:
             if col not in have:
                 c.execute(f"ALTER TABLE exec_sim ADD COLUMN {col} {typ}")
@@ -804,7 +805,7 @@ class Execd:
                 wl = list(self.watched)
                 n_upd, t_open, t_last = 0, time.time(), time.time()
                 print(f"{time.strftime('%H:%M:%S')} gRPC[{name}]: subscribing {len(wl)} wallets", flush=True)
-                for upd in stub.Subscribe(iter([gstream.subscribe_request(wl)])):
+                for upd in stub.Subscribe(iter([gstream.subscribe_request(wl, failed=True)])):
                     if self.stop:
                         break
                     n_upd += 1
@@ -835,6 +836,17 @@ class Execd:
         if not sig or sig in self.done:
             return
         self.n["grpc"] = self.n.get("grpc", 0) + 1
+        # PRECURSORS (09-03 idea): a watched wallet's FAILED swap, or a non-trade tx that
+        # touches a mint (ATA creation, wrap, transfer), may precede its real buy by
+        # 0.2-2 s and already names the mint. Record them; precursor_study.py measures
+        # how often and how far ahead they run before we ever act on one.
+        try:
+            failed = bool(tx.meta.err.err)
+        except Exception:
+            failed = False
+        if failed:
+            self._precursor(tx, upd, watched, "failed", seen, sig)
+            return
         logs = list(tx.meta.log_messages)
         # pump venues: the exact 0.3 ms path, straight from the event in the logs -
         # first notification wins (websocket or gRPC, both instant)
@@ -881,6 +893,29 @@ class Execd:
             threading.Thread(target=self.after_generic, args=(d, time.perf_counter(), 0.0), daemon=True).start()
         else:
             self.n["grpc_gen_none"] = self.n.get("grpc_gen_none", 0) + 1
+            self._precursor(tx, upd, watched, "nontrade", seen, sig)
+
+    def _precursor(self, tx, upd, watched, kind, seen, sig):
+        """record (wallet, mint) pairs a watched wallet touched in a failed or non-trade tx"""
+        import gstream
+        try:
+            keys = [gstream.b58(k) for k in tx.transaction.message.account_keys]
+            wallet = keys[0] if keys and keys[0] in watched else None
+            if not wallet:
+                return
+            skip = {gstream.WSOL, "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v", "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB"}
+            mints = {b.mint for b in list(tx.meta.pre_token_balances) + list(tx.meta.post_token_balances)
+                     if b.owner == wallet and b.mint not in skip}
+            if not mints:
+                return
+            c = store.db()
+            c.executemany("INSERT OR IGNORE INTO precursors VALUES(?,?,?,?,?,?)",
+                          [(sig, wallet, m, kind, seen, upd.transaction.slot) for m in mints])
+            c.commit()
+            c.close()
+            self.n["precursors"] = self.n.get("precursors", 0) + len(mints)
+        except Exception as e:
+            self.n["precursor_err"] = self.n.get("precursor_err", 0) + 1
 
     # ------------------------------------------------------------ the honest ruler
     def _slots_loop(self):

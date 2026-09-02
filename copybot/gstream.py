@@ -74,11 +74,13 @@ def channel(url, token=None):
                                                    ("grpc.keepalive_time_ms", 20000)])
 
 
-def subscribe_request(wallets, commitment="PROCESSED"):
+def subscribe_request(wallets, commitment="PROCESSED", failed=False):
+    """failed=True also streams the wallets' FAILED transactions: a whale's failed buy
+    (slippage / stale blockhash) names the mint and size ~1-2 s before the retry lands."""
     req = geyser_pb2.SubscribeRequest()
     f = req.transactions["watched"]
     f.vote = False
-    f.failed = False
+    f.failed = failed
     for w in wallets:
         f.account_include.append(w)
     req.commitment = geyser_pb2.CommitmentLevel.Value(commitment)
