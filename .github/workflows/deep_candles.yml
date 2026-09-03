@@ -39,8 +39,9 @@ jobs:
           python-version: "3.11"
       - run: pip install httpx
       - name: fetch shard
-        run: python copybot/deep_candles.py --coins ${{ inputs.coins }} --shard ${{ matrix.shard }}/${{ inputs.shards }} --out out/candles_${{ matrix.shard }}.db --max-calls 100000
+        run: python copybot/deep_candles.py --coins ${{ inputs.coins }} --shard ${{ matrix.shard }}/${{ inputs.shards }} --out out/candles_${{ matrix.shard }}.db --max-calls 300
       - uses: actions/upload-artifact@v4
+        if: always()
         with:
           name: candles-${{ matrix.shard }}
           path: out/*.db
